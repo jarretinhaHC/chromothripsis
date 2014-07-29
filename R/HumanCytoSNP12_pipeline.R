@@ -20,19 +20,30 @@ print(plt)
 dev.off()
 
 # Copy number estimation
-crlmmCopyNumber(gen)
+crlmmCopynumber(gen)
 
 # Downstream analysis
 # Data conversion to BafLrrSetList (bls)
+# Will generate some warnings
 bls <- BafLrrSetList(gen)
 
+# Illumina generates data outside chromosome range
+# Not sure what it means. Should I ask on foruns?
+# Functions will not work on this strange data
+# Let's filter it out for now
+
+cleanedBls <- bls[-(1:1)] 
+
 # Correct for genomic waves
-wins <- c(1e2, 1e4, 1e6)
-incs <- c(2e1, 2e3, 2e5)
-ArrayTV:::gcCorrect(bls[-(1:1)], maxwins=wins, increms=incs)
+# As this is a BafLrrSetList, return value is NULL
+# Everything is done in place
+# How do I calibrate the window size?
+windowSize <- 10^(2:6)
+increments <- 2 * 10^(1:5)
+ArrayTV:::gcCorrect(cleanedBls, maxwins=windowSize, increms=increments)
 
 # Fit HMM to identify CNVs
-fit <- hmmBafLrrSetList2(bls[-(1:1)])
+fit <- hmmBafLrrSetList2(cleanedBls)
 
 # Downstream analysis
 ranges <- unlist(fit)
