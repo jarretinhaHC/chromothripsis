@@ -1,0 +1,38 @@
+﻿# Load libs/packages
+
+library(ff)
+library(humancytosnp12v2p1hCrlmm)
+library(oligoClasses)
+library(Biobase)
+library(IRanges)
+library(crlmm)
+library(VanillaICE)
+library(ArrayTV)
+library(data.table)
+
+# Set packages options
+
+options(ffcaching="ffeachflush")
+
+# Set data folder and references
+datadir <- '/data/Cytogenomics/HumanCyto12/IDAT'
+sampleSheet <- read.delim('/data/Cytogenomics/HumanCyto12/SampleSheet/simples.tsv')
+
+#Set results folder
+outdir <- paste('/data/Cytogenomics/HumanCyto12/scratch/R-', getRversion(), '/r00', sep='')
+ldPath(outdir)
+dir.create(outdir, recursive=TRUE)
+
+# Define data, batches and related stuff
+arrayNames <- file.path(datadir, sampleSheet$Sample_ID)
+arrayInfo <- list(barcode=NULL, position='SentrixPosition')
+cdfName <- 'humancytosnp12v2p1h'
+batch <- rep("1", nrow(sampleSheet))
+sns <- sampleSheet$Sample_name
+
+# Check everything is in place
+print(all(file.exists(paste(arrayNames, "_Grn.idat", sep=""))))
+print(all(file.exists(paste(arrayNames, "_Red.idat", sep=""))))
+
+# Additional checks
+
