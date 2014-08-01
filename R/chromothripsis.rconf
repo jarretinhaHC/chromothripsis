@@ -9,9 +9,11 @@ library(crlmm)
 library(VanillaICE)
 library(ArrayTV)
 library(data.table)
+library(snow)
+library(doSNOW)
+library(foreach)
 
 # Set packages options
-
 options(ffcaching="ffeachflush")
 
 # Set data folder and references
