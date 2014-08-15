@@ -107,7 +107,7 @@ ranges <- sortSeqlevels(as(tmp$genes[, c('chr', 'start', 'end')], 'GRanges'))
 seqlengths(ranges) <- seqlengths(genome)[which(seqlevels(genome) %in% chr_set)]
 
 width <- 60e4
-seqs <- getSeq(genome, ranges, width=60e4)
+seqs <- getSeq(genome, ranges + width)
 # GC content calculations can take a long time
 # Let's parallelize it!
 tmp$genes$GC <- foreach(i=1:length(seqs), .combine=c) %dopar%
