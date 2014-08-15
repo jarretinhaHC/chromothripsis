@@ -3,21 +3,18 @@
 
 library(doMC)
 library(foreach)
-library(cghMCR)
 library(Repitools)
 library(BSgenome.Hsapiens.UCSC.hg19)
+library(CGHcall)
+library(reshape2)
 
 # Confs
-
 registerDoMC(cores=24)
 genome <- BSgenome.Hsapiens.UCSC.hg19
-
 basedir <- '/data/Cytogenomics/Agilent'
 datadir <- paste(basedir, 'raw/afe', sep='/')
 target_sheet <- 'targets.tsv'
 targets <- readTargets(paste(basedir, target_sheet, sep='/'), row.names='Name') 
-
-
 
 # Read target files and add some info
 # Agilent data is previously dye bias normalized with aCGH.Spline
@@ -56,8 +53,7 @@ median_bg_G <- apply(tmp$Gb[tmp$genes$chr %in% chr_set, , drop=FALSE], 2,
 median_bg_R <- apply(tmp$Rb[tmp$genes$chr %in% chr_set, , drop=FALSE], 2,
                      median, na.rm=TRUE)
 
-bg_flag <- (tmp$G > threshold * median_bg_G) & (tmp$R > threshold *
-                                                median_bg_R)
+bg_flag <- (tmp$G > threshold * median_bg_G) & (tmp$R > threshold * median_bg_R)
 tmp$G[!bg_flag] <- NA
 tmp$R[!bg_flag] <- NA
 
@@ -71,7 +67,7 @@ tmp$R <- log2(tmp$R)
 
 calculate_trim <- function(x){
 
-    observed <- scale(quantile(x, prob=seq(0, 1, 0.01)))
+    observed <- scale(quantile(x, na.rm=TRUE, prob=seq(0, 1, 0.01)))
     expected <- scale(quantile(rnorm(1000, mean(x), sd(x)), prob=seq(0, 1, 0.01)))
     diff <- observed - expected
     trim <- 0.01 * length(diff[which(abs(diff) > 1)])
@@ -83,12 +79,12 @@ trimG <- calculate_trim(tmp$G)
 trimR <- calculate_trim(tmp$R)
 
 # Trimmed means per sample
-tmp$Gtm <- apply(tmp$G, 2, mean, trim=trimG)
-tmp$Rtm <- apply(tmp$R, 2, mean, trim=trimR)
+tmp$Gtm <- apply(tmp$G, 2, mean, trim=trimG, na.rm=TRUE)
+tmp$Rtm <- apply(tmp$R, 2, mean, trim=trimR, na.rm=TRUE)
 
 # SD per sample
-tmp$Gsd <- apply(tmp$G, 2, sd)
-tmp$Rsd <- apply(tmp$R, 2, sd)
+tmp$Gsd <- apply(tmp$G, 2, sd, na.rm=TRUE)
+tmp$Rsd <- apply(tmp$R, 2, sd, na.rm=TRUE)
 
 for(sample in  tmp$ID){
 
@@ -125,10 +121,13 @@ tmp$Mwc <- fit$residuals
 
 # Now, correct artifacts
 # Remove medians per sample
-for(sample in tmp$ID) tmp$Mwc[, sample] <- tmp$Mwc[, sample] - median(tmp$Mwc[,
-                                                                      sample])
+for(sample in tmp$ID){
+
+    tmp$Mwc[, sample] <- tmp$Mwc[, sample] - median(tmp$Mwc[, sample], na.rm=TRUE)
+
+}
 # Probe means across samples for profiling
-tmp$genes$ProbeMeanMwc <- apply(tmp$Mwc, 1, mean)
+tmp$genes$ProbeMeanMwc <- apply(tmp$Mwc, 1, mean, na.rm=TRUE)
 
 # Calculate profile 
 tmp$genes$ProbeProfile <- smooth.splines(tmp$genes$ProbeMeanMwc,
@@ -150,6 +149,13 @@ segs <- postsegnormalized(segs)
 # It's show time! Call it!
 result <- CGHcall(segs)
 result <- ExpandCGHcall(result, segs)
+
+# Construct data frame from calls and locations
+df <- data.frame(calls(result), featureData(result)@data, check.names=FALSE) 
+
+# Melt it and construct ranges
+df <- melt(df, id.vars=c('Chromosome', 'Start', 'End'), variable.name='ID',
+           value.name='state')
 
 
 
