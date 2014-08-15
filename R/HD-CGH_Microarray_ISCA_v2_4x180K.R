@@ -116,10 +116,16 @@ tmp$genes$w <- ifelse(tmp$genes$GC < 0.5, 1e-3, 1e3)
 
 # Fit model, just love R!
 # Residuals are the wave corrected M
-# We need to watch for NAs
-fit <- lm(tmp$M ~ tmp$genes$GC + I(tmp$genes$GC^2), weights=tmp$genes$w,
-          na.action=na.exclude)
-tmp$Mwc <- resid(fit)
+# We need to watch for NAs on sample basis
+
+for(sample in tmp$ID){
+
+    fit <- lm(tmp$M[, sample] ~ tmp$genes$GC + I(tmp$genes$GC^2),
+              weights=tmp$genes$w,
+              na.action=na.exclude)
+    tmp$Mwc[, sample] <- resid(fit)
+
+}
 
 # Now, correct artifacts
 # Remove medians per sample
@@ -132,8 +138,7 @@ for(sample in tmp$ID){
 tmp$genes$ProbeMeanMwc <- apply(tmp$Mwc, 1, mean, na.rm=TRUE)
 
 # Calculate profile 
-tmp$genes$ProbeProfile <- smooth.splines(tmp$genes$ProbeMeanMwc,
-                                         all.knots=TRUE)$y
+tmp$genes$ProbeProfile <- smooth.spline(tmp$genes$ProbeMeanMwc, all.knots=TRUE)$y
 # Get the final M value!!!
 tmp$Mf <- tmp$Mwc - tmp$genes$ProbeProfile
 
