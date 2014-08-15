@@ -48,10 +48,8 @@ tmp <- raw[which(raw$genes$chr %in% chr_set),]
 
 # Remove background based on median values, threshold as you like
 threshold <- 5
-median_bg_G <- apply(tmp$Gb[tmp$genes$chr %in% chr_set, , drop=FALSE], 2,
-                     median, na.rm=TRUE)
-median_bg_R <- apply(tmp$Rb[tmp$genes$chr %in% chr_set, , drop=FALSE], 2,
-                     median, na.rm=TRUE)
+median_bg_G <- apply(tmp$Gb, 2, median, na.rm=TRUE)
+median_bg_R <- apply(tmp$Rb, 2, median, na.rm=TRUE)
 
 bg_flag <- (tmp$G > threshold * median_bg_G) & (tmp$R > threshold * median_bg_R)
 tmp$G[!bg_flag] <- NA
@@ -118,8 +116,10 @@ tmp$genes$w <- ifelse(tmp$genes$GC < 0.5, 1e-3, 1e3)
 
 # Fit model, just love R!
 # Residuals are the wave corrected M
-fit <- lm(tmp$M ~ tmp$genes$GC + I(tmp$genes$GC^2), weights=tmp$genes$w)
-tmp$Mwc <- fit$residuals
+# We need to watch for NAs
+fit <- lm(tmp$M ~ tmp$genes$GC + I(tmp$genes$GC^2), weights=tmp$genes$w,
+          na.action=na.exclude)
+tmp$Mwc <- resid(fit)
 
 # Now, correct artifacts
 # Remove medians per sample
