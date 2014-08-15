@@ -1,5 +1,5 @@
 # Remember to create apropriate conf files
-#source('rconf/agilent.rconf')
+# source('rconf/agilent.rconf')
 
 library(doMC)
 library(foreach)
@@ -68,7 +68,9 @@ tmp$R <- log2(tmp$R)
 calculate_trim <- function(x){
 
     observed <- scale(quantile(x, na.rm=TRUE, prob=seq(0, 1, 0.01)))
-    expected <- scale(quantile(rnorm(1000, mean(x), sd(x)), prob=seq(0, 1, 0.01)))
+    mn <- mean(x, na.rm=TRUE)
+    sd <- sd(x, na.rm=TRUE)
+    expected <- scale(quantile(rnorm(1000, mn, sd), prob=seq(0, 1, 0.01)))
     diff <- observed - expected
     trim <- 0.01 * length(diff[which(abs(diff) > 1)])
     return(trim)
