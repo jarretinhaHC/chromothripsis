@@ -60,11 +60,8 @@ tmp$Gb <- tmp$Rb <- c()
 
 # Remove probes without at least one valid intensity
 # A bit tricky but works
-tmp$genes <- tmp$genes[apply(tmp$G, 1, function(x) !all(is.na(x))), ]
-tmp$genes <- tmp$genes[apply(tmp$R, 1, function(x) !all(is.na(x))), ]
-
-tmp$G <- tmp$G[apply(tmp$G, 1, function(x) !all(is.na(x))), ]
-tmp$R <- tmp$R[apply(tmp$R, 1, function(x) !all(is.na(x))), ]
+tmp <- tmp[apply(tmp$G, 1, function(x) !all(is.na(x))), ]
+tmp <- tmp[apply(tmp$R, 1, function(x) !all(is.na(x))), ]
 
 # Log intensities
 
