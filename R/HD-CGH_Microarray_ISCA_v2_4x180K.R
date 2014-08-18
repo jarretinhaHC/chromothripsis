@@ -100,7 +100,7 @@ tmp$A <- (tmp$G + tmp$R) / 2
 
 # Remove probes without at least one valid intensity
 # A bit tricky but works
-tmp <- tmp[apply(tmp, 1, function(x) !all(is.na(x))), ]
+tmp$genes <- tmp$genes[apply(tmp$M, 1, function(x) !all(is.na(x))), ]
 
 # Genomic waves correction
 # Parameters suggested by previous studies with ArrayTV
