@@ -118,6 +118,10 @@ tmp$genes$w <- ifelse(tmp$genes$GC < 0.5, 1e-3, 1e3)
 # Residuals are the wave corrected M
 # We need to watch for NAs on sample basis
 
+# Just using tmp$M as a template
+# Yeah, I know it's not safe
+
+tmp$Mwc <- tmp$M
 for(sample in tmp$ID){
 
     fit <- lm(tmp$M[, sample] ~ tmp$genes$GC + I(tmp$genes$GC^2),
