@@ -55,6 +55,7 @@ bg_flag <- (tmp$G > threshold * median_bg_G) & (tmp$R > threshold * median_bg_R)
 tmp$G[!bg_flag] <- NA
 tmp$R[!bg_flag] <- NA
 
+
 # Log intensities
 
 tmp$G <- log2(tmp$G)
@@ -96,6 +97,10 @@ for(sample in  tmp$ID){
 # Normalized ratio and average intensities
 tmp$M <- tmp$G - tmp$R
 tmp$A <- (tmp$G + tmp$R) / 2
+
+# Remove probes without at least one valid intensity
+# A bit tricky but works
+tmp <- tmp[apply(tmp, 1, function(x) !all(is.na(x))), ]
 
 # Genomic waves correction
 # Parameters suggested by previous studies with ArrayTV
