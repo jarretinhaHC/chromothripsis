@@ -110,6 +110,7 @@ tmp$A <- (tmp$G + tmp$R) / 2
 # Window size of about 120kbp for Agilent
 
 ranges <- sortSeqlevels(as(tmp$genes[, c('chr', 'start', 'end')], 'GRanges'))
+ranges <- sort(ranges)
 seqlengths(ranges) <- seqlengths(genome)[which(seqlevels(genome) %in% chr_set)]
 
 width <- 60e4
@@ -155,26 +156,75 @@ tmp$genes$ProbeProfile <- smooth.spline(tmp$genes$ProbeMeanMwc, all.knots=TRUE)$
 tmp$Mf <- tmp$Mwc - tmp$genes$ProbeProfile
 
 # Segmentation and copy state calling with CGHCall
-segs <- make_cghRaw(data.frame(tmp$genes$ProbeName, tmp$genes[, c('chr',
-                                                                 'start',
-                                                                 'end')],
-                              tmp$Mf, check.names=FALSE))
+# Found that make_cghRaw is buggy
+# DNAcopy remove NAs, so one get unequal length results
+# segmentData cannot deal with unequal length
+# So, we need to treat each sample separately
+# No problem! Both DNAcopy and CGHcall operate on a sample basis.
 
-# Data is already cleaned, so proceed to segmentation
-# Default parameters are fine
-segs <- segmentData(segs)
-segs <- postsegnormalized(segs)
+chr_names_to_numbers <- function(chr){
 
-# It's show time! Call it!
-result <- CGHcall(segs)
-result <- ExpandCGHcall(result, segs)
+    tmp <- gsub('chr', '', chr)
+    tmp <- gsub('X', '23', tmp)
+    tmp <- gsub('Y', '24', tmp)
+    tmp <- gsub('MT', '25', tmp)
 
-# Construct data frame from calls and locations
-df <- data.frame(calls(result), featureData(result)@data, check.names=FALSE) 
+    return(as.integer(tmp))
 
-# Melt it and construct ranges
-df <- melt(df, id.vars=c('Chromosome', 'Start', 'End'), variable.name='ID',
-           value.name='state')
+}
 
+# Feeling a bit rude
+# Should be a more idiomatic way of doing this
 
+results <- list()
+
+# Static annotation stuff
+metadata <- data.frame(labelDescription=c('Chromosomal position',
+                                          'Position start',
+                                          'Position end'),
+                       row.names=c('Chromosome', 'Start', 'End'))
+dimLabels <- c('featureNames', 'featureColumns')
+
+for(sample in tmp$ID){
+
+    # Let's create a cghRaw object manually
+    NA_flag <- !is.na(tmp$Mf[, sample]) 
+    copynumber <- as.matrix(tmp$Mf[NA_flag, sample])
+    colnames(copynumber) <- sample
+    rownames(copynumber) <- tmp$genes$ProbeName[NA_flag]
+    chr <- chr_names_to_numbers(tmp$genes$chr[NA_flag])
+    start <- tmp$genes$start[NA_flag]
+    end <- tmp$genes$end[NA_flag]
+    probenames <- tmp$genes$ProbeName[NA_flag]
+
+    # Create chgRaw object for current sample
+    annotation_data <- data.frame(Chromosome=chr, Start=start, End=end,
+                                  row.names=probenames)
+    annotation <- new('AnnotatedDataFrame', data=annotation_data,
+                      dimLabels=dimLabels, varMetada=metadata)
+
+    raw_cgh <- new('cghRaw', copynumber=copynumber, featureData=annotation)
+    
+    # Data is already cleaned, so proceed to segmentation
+    # Default parameters are fine
+    segs <- segmentData(raw_cgh)
+    segs <- postsegnormalize(segs)
+
+    # It's show time! Call it!
+    # It work until here, then got this error
+    # Error in data.frame(regions2, genord = 1:nreg2) : 
+    # arguments imply differing number of rows: 0, 2
+
+    result <- CGHcall(segs)
+    result <- ExpandCGHcall(result, segs)
+    results[[sample]] <- result
+
+    # Construct data frame from calls and locations
+    # df <- data.frame(calls(result), featureData(result)@data, check.names=FALSE) 
+
+    # Melt it and construct ranges
+    # df <- melt(df, id.vars=c('Chromosome', 'Start', 'End'), variable.name='ID',
+    #       value.name='state')
+
+}
 
