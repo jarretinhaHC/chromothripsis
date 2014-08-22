@@ -1,29 +1,46 @@
 # Remember to create apropriate conf files
 # source('rconf/agilent.rconf')
 
+library(limma)
 library(doMC)
 library(foreach)
 library(Repitools)
 library(BSgenome.Hsapiens.UCSC.hg19)
-library(CGHcall)
+library(SMAP)
 library(reshape2)
 
 # Confs
 registerDoMC(cores=24)
 genome <- BSgenome.Hsapiens.UCSC.hg19
 basedir <- '/data/Cytogenomics/Agilent'
+outdir <- '/data/Cytogenomics/Agilent/results'
 datadir <- paste(basedir, 'raw/afe', sep='/')
 target_sheet <- 'targets.tsv'
 targets <- readTargets(paste(basedir, target_sheet, sep='/'), row.names='Name') 
 
-# Read target files and add some info
-# Agilent data is previously dye bias normalized with aCGH.Spline
-# Why the writeFE options create so badly behaved filenames?
-# batch.spline(dir=datadir, writeFE=TRUE)
+### READ DATA
 
+# Read data, annotate design, printer, names, etc.
 raw <- read.maimages(targets, path=datadir, source='agilent', names=targets$Name)
 raw$design <- rep(-1, dim(raw)[[2]])
+
+# Printer layout isn't right, need additional Block column 
+# Info from marray
+# maNgr 1
+# maNgc 1
+# maNsr 1064
+# maNsc 170
+# maNspots 180880
+# maSub 180875
+raw$printer <- data.frame(ngrid.r=1,
+                          ngrid.c=1,
+                          nspot.r=dim(raw)[[1]],
+                          nspot.c=1)
+
 raw$ID <- targets$Name
+
+# Quality control
+limma::plotMA3by2(raw, prefix='QualityControlMA - Raw', path=outdir)
 
 # Chromosome info and position are buried inside genes$SystematicName
 # Need to split the string and retrieve chr and start coord
@@ -36,12 +53,18 @@ coords <- ifelse(!raw$genes$ControlType, strsplit(raw$genes$SystematicName, '[:-
 raw$genes$ID <- 1:dim(raw$genes)[[1]]
 raw$genes$chr <- sapply(coords, function(x) ifelse(x[1] %in% chr_set, x[1], NA))
 raw$genes$start <- sapply(coords, function(x) ifelse(x[1] %in% chr_set,
-                                                        as.numeric(x[2]), NA))
+                                                        as.integer(x[2]), NA))
 raw$genes$end <- sapply(coords, function(x) ifelse(x[1] %in% chr_set,
-                                                        as.numeric(x[3]), NA))
+                                                        as.integer(x[3]), NA))
+
+### CLEANING, NORMALIZATION & CORRECTIONS
 
 # Manual normalization based on Chen, J. et al. (2011)
-# See doi: 10.1186/gb-2011-12-8-r80 
+# See doi: 10.1186/gb-2011-12-8-r80
+
+# At first, I've tought the method described in the above paper would suffice.
+# Of course, It don't! I think normalization using trimmed mean don't work
+# as expected.
 
 # We don't need controls and related stuff without coords
 tmp <- raw[which(raw$genes$chr %in% chr_set),]
@@ -133,12 +156,15 @@ tmp$genes$w <- ifelse(tmp$genes$GC < 0.5, 1e-3, 1e3)
 tmp$Mwc <- tmp$M
 for(sample in tmp$ID){
 
+    # The model in the source don't have the quadratic term
     fit <- lm(tmp$M[, sample] ~ tmp$genes$GC + I(tmp$genes$GC^2),
               weights=tmp$genes$w,
               na.action=na.exclude)
     tmp$Mwc[, sample] <- resid(fit)
 
 }
+# Results aren't good! Residuals reintroduced scale problems
+# Besides, a lot of data points are lost
 
 # Now, correct artifacts
 # Remove medians per sample
@@ -147,77 +173,55 @@ for(sample in tmp$ID){
     tmp$Mwc[, sample] <- tmp$Mwc[, sample] - median(tmp$Mwc[, sample], na.rm=TRUE)
 
 }
+
 # Probe means across samples for profiling
 tmp$genes$ProbeMeanMwc <- apply(tmp$Mwc, 1, mean, na.rm=TRUE)
-
 # Calculate profile 
 tmp$genes$ProbeProfile <- smooth.spline(tmp$genes$ProbeMeanMwc, all.knots=TRUE)$y
 # Get the final M value!!!
 tmp$Mf <- tmp$Mwc - tmp$genes$ProbeProfile
 
-# Segmentation and copy state calling with CGHCall
-# Found that make_cghRaw is buggy
-# DNAcopy remove NAs, so one get unequal length results
-# segmentData cannot deal with unequal length
-# So, we need to treat each sample separately
-# No problem! Both DNAcopy and CGHcall operate on a sample basis.
+### SEGMENTATION, COPY STATE CALLING AND RELATED STUFF
 
-chr_names_to_numbers <- function(chr){
-
-    tmp <- gsub('chr', '', chr)
-    tmp <- gsub('X', '23', tmp)
-    tmp <- gsub('Y', '24', tmp)
-    tmp <- gsub('MT', '25', tmp)
-
-    return(as.integer(tmp))
-
-}
-
-# Feeling a bit rude
-# Should be a more idiomatic way of doing this
+# Copy state calling with SMAP
 
 results <- list()
 
-# Static annotation stuff
-metadata <- data.frame(labelDescription=c('Chromosomal position',
-                                          'Position start',
-                                          'Position end'),
-                       row.names=c('Chromosome', 'Start', 'End'))
-dimLabels <- c('featureNames', 'featureColumns')
+# Construct HMM object
+# Six states are what matters
+nstates <- 6
+init.trans <- 0.02
+init.means <- c(0.4, 0.7, 1, 1.3, 1.6, 3)
+init.sd <- rep(0.1, nstates)
+# Build HMM
+hmm <- SMAPHMM(noStates=nstates, Phi=phi, initTrans=init.trans)
 
 for(sample in tmp$ID){
 
-    # Let's create a cghRaw object manually
+    # Let's create SMAPObservation object
+    # First, get rid of NAs
     NA_flag <- !is.na(tmp$Mf[, sample]) 
-    copynumber <- as.matrix(tmp$Mf[NA_flag, sample])
-    colnames(copynumber) <- sample
-    rownames(copynumber) <- tmp$genes$ProbeName[NA_flag]
-    chr <- chr_names_to_numbers(tmp$genes$chr[NA_flag])
+    copynumber <- tmp$Mf[NA_flag, sample]
+    chr <- tmp$genes$chr[NA_flag]
     start <- tmp$genes$start[NA_flag]
     end <- tmp$genes$end[NA_flag]
     probenames <- tmp$genes$ProbeName[NA_flag]
 
-    # Create chgRaw object for current sample
-    annotation_data <- data.frame(Chromosome=chr, Start=start, End=end,
-                                  row.names=probenames)
-    annotation <- new('AnnotatedDataFrame', data=annotation_data,
-                      dimLabels=dimLabels, varMetada=metadata)
+    # Then create object
+    obs <- SMAPObservations(value=copynumber,
+                            chromosome=chr,
+                            startPosition=start,
+                            endPosition=end,
+                            name=sample,
+                            reporterId=probenames)
 
-    raw_cgh <- new('cghRaw', copynumber=copynumber, featureData=annotation)
+    # Run profiling
+    profile <- smap(hmm, obs, verbose=2)
+
+    result <- data.frame(chr, start, end, state=Q(profile),
+                         row.names=probenames)
     
-    # Data is already cleaned, so proceed to segmentation
-    # Default parameters are fine
-    segs <- segmentData(raw_cgh)
-    segs <- postsegnormalize(segs)
-
-    # It's show time! Call it!
-    # It work until here, then got this error
-    # Error in data.frame(regions2, genord = 1:nreg2) : 
-    # arguments imply differing number of rows: 0, 2
-
-    result <- CGHcall(segs)
-    result <- ExpandCGHcall(result, segs)
-    results[[sample]] <- result
+    
 
     # Construct data frame from calls and locations
     # df <- data.frame(calls(result), featureData(result)@data, check.names=FALSE) 
