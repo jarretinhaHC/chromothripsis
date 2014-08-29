@@ -110,27 +110,79 @@ gcCorrect(cleaned_bls, maxwins=maxwins, increms=increms)
 # Takes a long time!!!
 fit <- unlist(hmmBafLrrSetList2(cleaned_bls))
 
+# Get rid of small width segments
+fit <- fit[width(fit) > 1, ]
+
+# Add some annotations from the sample sheet to the results
+fit@elementMetadata <- merge(fit@elementMetadata,
+                             sampleSheet,
+                             by.x=c('sample'),
+                             by.y=c('Sample_ID'),
+                             all.y=TRUE)
+
+# All alterations
+# Filter segments with same state
+ranges <- fit[state(fit) %in% c('1', '2', '5', '6'), ]
+
+# Convert to ranges with coverage
+ranges_with_coverage <- as(coverage(ranges), 'GRanges')
+
+# Annotate samples per segment
+overlaps <- findOverlaps(ranges, ranges_with_coverage)
+qidx <- queryHits(overlaps)
+sidx <- subjectHits(overlaps)
+tmp <- tapply(ranges$Sample_Name[qidx], sidx, list)
+ranges_with_coverage$samples <- NA
+ranges_with_coverage$samples[as.integer(names(tmp))] <- tmp
+ranges_with_coverage$samples <- sapply(ranges_with_coverage$samples,
+                                       FUN=paste, collapse=' | ')
+
+# Print coverage data as tsv and to feed in Circos
+df <- as.data.frame(ranges_with_coverage, row.names=NULL)
+df <- as.data.table(df)
+df <- df[df$score > 0, ]
+
+# Table data/Coverage
+filename <- 'ranges_with_coverage_all_states.tsv'
+write.table(df,
+            file=paste(outdir, filename, sep='/'),
+            sep='\t',
+            row.names=FALSE,
+            quote=FALSE)
+
+# Circos/Coverage
+data <- data.frame('CHR'=gsub('chr', 'hs', df$seqnames),
+                   'START'=df$start,
+                   'END'=df$end)
+
+data$SCORE <- paste0('score=', df$score)
+filename <- 'ranges_with_coverage_for_circos_all_states.dat'
+write.table(data,
+            file=paste(outdir, filename, sep='/'),
+            sep='\t',
+            row.names=FALSE,
+            col.names=FALSE,
+            quote=FALSE)
+
+# Results separated by copy state, all samples
 # Idea is to reduce ranges to a single data track and add a coverage track
 for(st in 1:6){
-    
+
     # Filter segments with same state
     ranges <- fit[state(fit) == st, ]
 
     # Convert to ranges with coverage
     ranges_with_coverage <- as(coverage(ranges), 'GRanges')
 
-    # Reduce to get a idea of total length
-    reduced_ranges <- reduce(ranges)
-
     # Annotate samples per segment
     overlaps <- findOverlaps(ranges, ranges_with_coverage)
     qidx <- queryHits(overlaps)
     sidx <- subjectHits(overlaps)
-    tmp <- tapply(sampleNames(ranges)[qidx], sidx, list)
+    tmp <- tapply(ranges$Sample_Name[qidx], sidx, list)
     ranges_with_coverage$samples <- NA
     ranges_with_coverage$samples[as.integer(names(tmp))] <- tmp
     ranges_with_coverage$samples <- sapply(ranges_with_coverage$samples,
-                                           FUN=paste, collapse='|')
+                                           FUN=paste, collapse=' | ')
 
     # Print coverage data as tsv and to feed in Circos
     df <- as.data.frame(ranges_with_coverage, row.names=NULL)
@@ -159,17 +211,37 @@ for(st in 1:6){
                 col.names=FALSE,
                 quote=FALSE)
 
-    # Circos/Reduced range
-	df <- as.data.frame(reduced_ranges, row.names=NULL)
-    df$strand <- c()
-    df <- df[df$width == 1, ]
+}
 
+# Results per sample and all copy states
+for(sample in sampleNames(fit)){
+
+    # All alterations
+    # Filter segments with same state
+    ranges <- fit[sampleNames(fit) == sample, ]
+
+    # Print coverage data as tsv and to feed in Circos
+    df <- as.data.frame(ranges, row.names=NULL)
+
+    # Table data
+    sample_name <- unique(ranges$Sample_Name)
+    filename <- paste0(sample_name, '_ranges_all_states.tsv')
+    dir.create(paste(outdir, sample_name, sep='/'))
+    write.table(df,
+                file=paste(outdir, sample_name, filename, sep='/'),
+                sep='\t',
+                row.names=FALSE,
+                quote=FALSE)
+
+    # Circos
     data <- data.frame('CHR'=gsub('chr', 'hs', df$seqnames),
-                       'START'=df$start,
-                       'END'=df$end)
-    filename <- paste0('reduced_ranges_for_circos_', st, '.dat')
+                   'START'=df$start,
+                   'END'=df$end,
+                   'STATE'=paste0('state=', df$state))
+
+    filename <- paste0(sample_name, '_ranges_for_circos_all_states.dat')
     write.table(data,
-                file=paste(outdir, filename, sep='/'),
+                file=paste(outdir, sample_name, filename, sep='/'),
                 sep='\t',
                 row.names=FALSE,
                 col.names=FALSE,
