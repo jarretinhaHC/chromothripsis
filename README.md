@@ -15,20 +15,39 @@ Licenses will be very liberal, so don't worry about it.
 Pipelines
 =========
 
-HD_CGH_Microarray_ISCA_v2_4x180k
+SurePrintG3Custom
 --------------------------------
 
 Covers Agilent SurePrint aCGH arrays. It's intended to:
- - Read
- - Background removal (median)
- - Standardization by trimmed means, outliers removed based on quantiles
- - Genomic wave correction using a quadratic polynomial model
- - Genomic artifacts correction using cubic splines
- - Segmentation/copy state calling using CGHcall
- - Post-processing to get a sheet of regions, state and coverage
- 
+ - Read arrays
+ - Preprocessing using limma
+ - Genomic wave correction using ArrayTV
+ - Segmentation/copy state calling using DNAcopy/CGHcall (not working)
+ - Post-processing to get a sheet of regions, state and coverage (partially
+ working)
+
+Agilent arrays are particularly susceptible to genomic waves. 
+
 HumanCytoSNP12
 --------------
 
 Covers Illumina arrays using crlmm/ArrayTV/VanillaICE. Results are a sheet of
-regions, state and coverage.
+regions, state and coverage:
+ - Genotype with arrays crlmm/genotype.Illumina
+ - Estimate copy number with crlmmCopynumber
+ - Correct for genomic waves with ArrayTV
+ - Segment copy state calling with VanillaICE
+ - Parse results per state in all samples (coverage in mind)
+ - Parse results per sample (dx in mind)
+
+TruSeq
+------
+
+Covers RNA-seq made with TruSeq/HiScanSq aimed at variants discovery (SNP,
+splicing, etc.) and differential expression:
+ - Quality control with ShortRead
+ - Mapping with align/Rsubread
+ - Splicing junction finding with subjunc/Rsubread 
+ - SNP discovery with exactSNP/Rsubread
+ - DE with DESeq2
+

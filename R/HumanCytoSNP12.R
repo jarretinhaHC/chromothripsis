@@ -17,12 +17,17 @@ library(ArrayTV)
 library(data.table)
 library(doParallel)
 library(foreach)
+library(ggplot2)
+library(AnnotationHub)
+library(rtracklayer)
+library(BSgenome.Hsapiens.UCSC.hg19)
 
 # Let's parallelize calculations.
 registerDoParallel()
 ocSamples(60)
 
-# Set data folder and references
+# Set data folder, genome and references
+genome <- BSgenome.Hsapiens.UCSC.hg19
 basedir <- '/data/Cytogenomics/HumanCyto12'
 datadir <- paste(basedir, 'IDAT', sep='/')
 sampleSheet <-read.delim(paste(basedir, 'SampleSheet/simples.tsv', sep='/'),
@@ -63,8 +68,8 @@ gen <- genotype.Illumina(sampleSheet=sampleSheet,
                          batch=batch,
                          sns=sns)
 # Check data quality
-snr <- cnSet$SNR[]
-barcodes <- rapply(strsplit(sampleNames(cnSet), '_'), function(x) head(x, 1))
+snr <- gen$SNR[]
+barcodes <- rapply(strsplit(sampleNames(gen), '_'), function(x) head(x, 1))
 snr <- data.frame(SNR=snr, Array=barcodes)
 
 pdf(paste('DataQualityHistogramOverall.pdf', sep='/'))
@@ -74,7 +79,7 @@ plt <- plt + ylab('Amostras')
 print(plt)
 dev.off()
 
-pdf(paste(outdir, 'DataQualityHistogramArray.pdf', sep='/')
+pdf(paste(outdir, 'DataQualityHistogramArray.pdf', sep='/'))
 plt <- ggplot(data=snr, aes(SNR, fill=Array))
 plt <- plt + geom_bar(binwidth=1, colour='black', alpha='0.75') + ylab('Amostras')
 plt <- plt + facet_wrap(~Array)
@@ -213,15 +218,92 @@ for(st in 1:6){
 
 }
 
+
+# Now it's time to annotate things properly
+# CytoSNP uses dbSNP data and its identifiers
+# But, let's try first to retrieve what genes are in each region
+
+# Set up the annotation hub and store some info
+hub <- AnnotationHub()
+sversion <- snapshotVersion(hub) 
+sdate <- snapshotDate(hub)
+
+# We want human, hg19, gene related stuff
+# Don't know how to filter using Tags, yet
+filters(hub) <- list(Species='Homo sapiens', Genome='hg19')
+
+# Let's try a direct approach and query UCSC
+# Start a new session
+session <- browserSession()
+
 # Results per sample and all copy states
 for(sample in sampleNames(fit)){
 
-    # All alterations
-    # Filter segments with same state
-    ranges <- fit[sampleNames(fit) == sample, ]
+    # All alterations, exclude normal
+    ranges <- fit[sampleNames(fit) == sample & state(fit) != 3 , ]
 
-    # Print coverage data as tsv and to feed in Circos
+    # Let's retrieve RefSeq data
+    # RefSeq
+    trackName <- 'RefSeq Genes'
+    tableName <- 'refGene'
+
+    # Retrieve the data
+    res <- getTable(ucscTableQuery(session,
+                                   track=trackName,
+                                   range=fit,
+                                   table=tableName))
+    # Convert to GRanges
+    res <- makeGRangesFromDataFrame(res,
+                                    seqinfo=genome@seqinfo,
+                                    start.field='txStart',
+                                    end.field='txEnd',
+                                    keep.extra.columns=TRUE)
+
+    # Use the same overlap strategy to count genes per region
+    overlaps <- findOverlaps(ranges, res)
+    qidx <- queryHits(overlaps)
+    sidx <- subjectHits(overlaps)
+    # Note how we use sidx!!!
+    tmp <- tapply(ranges$name2[sidx], qidx, list)
+    # Get rid of duplicate gene symbols
+    tmp <- lapply(tmp, unique)
+
+    ranges$genes <- NA
+    ranges$genes[as.integer(names(tmp))] <- tmp
+    ranges$genes <- sapply(ranges$genes, FUN=paste, collapse='|')
+
+    # Let's retrieve DGV data
+    # RefSeq
+    trackName <- 'DGV Struc Var'
+    tableName <- 'dgvMerged'
+
+    # Retrieve the data
+    res <- getTable(ucscTableQuery(session,
+                                   track=trackName,
+                                   range=fit,
+                                   table=tableName))
+    # Convert to GRanges
+    res <- makeGRangesFromDataFrame(res,
+                                    seqinfo=genome@seqinfo,
+                                    start.field='chromStart',
+                                    end.field='chromEnd',
+                                    keep.extra.columns=TRUE)
+
+    # Use the same overlap strategy to count genes per region
+    overlaps <- findOverlaps(ranges, res)
+    qidx <- queryHits(overlaps)
+    sidx <- subjectHits(overlaps)
+    # Note how we use sidx!!!
+    tmp <- tapply(ranges$name2[sidx], qidx, list)
+    # Get rid of duplicate gene symbols
+    tmp <- lapply(tmp, unique)
+
+    ranges$genes <- NA
+    ranges$genes[as.integer(names(tmp))] <- tmp
+    ranges$genes <- sapply(ranges$genes, FUN=paste, collapse='|')
+   # Convert for printing and smile!!!
     df <- as.data.frame(ranges, row.names=NULL)
+    df <- as.data.table(df)
 
     # Table data
     sample_name <- unique(ranges$Sample_Name)
@@ -248,4 +330,5 @@ for(sample in sampleNames(fit)){
                 quote=FALSE)
 
 }
+
 
